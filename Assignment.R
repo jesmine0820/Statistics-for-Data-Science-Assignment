@@ -1,4 +1,4 @@
-# Load the necessary libraries
+# Load necessary libraries
 library(ggplot2)
 library(GGally)
 library(reshape2)
@@ -129,20 +129,27 @@ ggplot(msft, aes(x = Date)) +
 # 2. Histogram
 # Histogram of Open, Close, and Adj Close Prices with Kernel Density Estimate
 msft_long <- msft %>%
-  select(Open, Close, Adj.Close) %>%
-  pivot_longer(cols = everything(), names_to = "Price_Type", values_to = "Price")
+  pivot_longer(cols = c(Open, Close, Adj.Close),
+               names_to = "Price_Type",
+               values_to = "Price")
+
+str(msft_long)
 
 ggplot(msft_long, aes(x = Price, fill = Price_Type)) +
-  geom_histogram(aes(y = ..density..), binwidth = 1, alpha = 0.5, position = "identity") +
+  geom_histogram(aes(y = after_stat(density)), binwidth = 1, alpha = 0.5, position = "identity") +
   geom_density(alpha = 0.5) +
-  labs(title = "Histogram of Open, Close, and Adj Close Prices with Kernel Density Estimate", x = "Price", y = "Density") +
+  labs(title = "Histogram of Open, Close, and Adj Close Prices with Kernel Density Estimate", 
+       x = "Price", 
+       y = "Density") +
   facet_wrap(~Price_Type, scales = "free")
+
 
 # 3. Box Plots
 # Box Plots for Prices
 msft_long <- msft %>%
-  select(Open, Close, Adj.Close, High, Low) %>%
-  pivot_longer(cols = everything(), names_to = "Price_Type", values_to = "Price")
+  pivot_longer(cols = c(Open, Close, Adj.Close, High, Low),
+               names_to = "Price_Type",
+               values_to = "Price")
 
 ggplot(msft_long, aes(x = Price_Type, y = Price, fill = Price_Type)) +
   geom_boxplot() +
@@ -150,9 +157,14 @@ ggplot(msft_long, aes(x = Price_Type, y = Price, fill = Price_Type)) +
 
 # 4. Heatmap of Correlation
 msft_numeric <- msft %>%
-  select(Open, Close, Adj.Close, High, Low, Volume)
+  pivot_longer(cols = c(Open, Close, Adj.Close, High, Low, Volume),
+               names_to = "Variable",
+               values_to = "Value")
 
-corr_matrix <- cor(msft_numeric)
+msft_wide <- msft_numeric %>%
+  pivot_wider(names_from = Variable, values_from = Value)
+
+corr_matrix <- cor(msft_wide %>% select_if(is.numeric), use = "complete.obs")
 
 corrplot(corr_matrix, method = "color", type = "upper", order = "hclust", 
          tl.col = "black", tl.srt = 45, addCoef.col = "black")
@@ -188,9 +200,23 @@ ggplot(msft, aes(x = Date)) +
   scale_color_manual(values = c("Open" = "blue", "Open Trend" = "lightblue", "Close" = "green", "Close Trend" = "lightgreen", "Adj Close" = "red", "Adj Close Trend" = "pink"))
 
 # 2. Moving Averages
+# Calculate rolling mean with NA values
 msft$Open_MA <- rollmean(msft$Open, k = 30, fill = NA, align = "right")
 msft$Close_MA <- rollmean(msft$Close, k = 30, fill = NA, align = "right")
 msft$Adj.Close_MA <- rollmean(msft$Adj.Close, k = 30, fill = NA, align = "right")
+
+# Forward-fill the NA values introduced by the rolling mean
+if (!all(is.na(msft$Open_MA))) {
+  msft$Open_MA <- na.locf(msft$Open_MA, na.rm = FALSE)
+}
+
+if (!all(is.na(msft$Close_MA))) {
+  msft$Close_MA <- na.locf(msft$Close_MA, na.rm = FALSE)
+}
+
+if (!all(is.na(msft$Adj.Close_MA))) {
+  msft$Adj.Close_MA <- na.locf(msft$Adj.Close_MA, na.rm = FALSE)
+}
 
 # Plot the Moving Averages
 ggplot(msft, aes(x = Date)) +
@@ -269,132 +295,69 @@ test_data <- msft %>% filter(Date >= as.Date("2002-01-01") & Date <= as.Date("20
 # 4.1 Model Identification and Model Fitting
 # 1. ARIMA Model
 arima_open <- auto.arima(train_data$Open)
-summary(arima_open)
-
-arima_close <- auto.arima(train_data$Close)
-summary(arima_close)
-
-arima_adj_close <- auto.arima(train_data$Adj.Close)
-summary(arima_adj_close)
+arima_forecast_open <- forecast(arima_open, h = nrow(test_data))$mean
+rmse_arima_open <- rmse(test_data$Open, arima_forecast_open)
+mae_arima_open <- mae(test_data$Open, arima_forecast_open)
+mape_arima_open <- mape(test_data$Open, arima_forecast_open)
 
 # 2. Seasonal ARIMA (SARIMA)
 sarima_open <- auto.arima(train_data$Open, seasonal = TRUE)
-summary(sarima_open)
-
-sarima_close <- auto.arima(train_data$Close, seasonal = TRUE)
-summary(sarima_close)
-
-sarima_adj_close <- auto.arima(train_data$Adj.Close, seasonal = TRUE)
-summary(sarima_adj_close)
+sarima_forecast_open <- forecast(sarima_open, h = nrow(test_data))$mean
+rmse_sarima_open <- rmse(test_data$Open, sarima_forecast_open)
+mae_sarima_open <- mae(test_data$Open, sarima_forecast_open)
+mape_sarima_open <- mape(test_data$Open, sarima_forecast_open)
 
 # 3. Exponential Smoothing (Holt-Winters)
 hw_open <- HoltWinters(ts(train_data$Open, frequency = 365))
-summary(hw_open)
-
-hw_close <- HoltWinters(ts(train_data$Close, frequency = 365))
-summary(hw_close)
-
-hw_adj_close <- HoltWinters(ts(train_data$Adj.Close, frequency = 365))
-summary(hw_adj_close)
+hw_forecast_open <- forecast(hw_open, h = nrow(test_data))$mean
+rmse_hw_open <- rmse(test_data$Open, hw_forecast_open)
+mae_hw_open <- mae(test_data$Open, hw_forecast_open)
+mape_hw_open <- mape(test_data$Open, hw_forecast_open)
 
 # 4. Prophet
 prophet_open <- prophet(data.frame(ds = train_data$Date, y = train_data$Open))
-future_open <- make_future_dataframe(prophet_open, periods = 365)
+future_open <- make_future_dataframe(prophet_open, periods = nrow(test_data))
 forecast_open <- predict(prophet_open, future_open)
-plot(prophet_open, forecast_open)
-
-prophet_close <- prophet(data.frame(ds = train_data$Date, y = train_data$Close))
-future_close <- make_future_dataframe(prophet_close, periods = 365)
-forecast_close <- predict(prophet_close, future_close)
-plot(prophet_close, forecast_close)
-
-prophet_adj_close <- prophet(data.frame(ds = train_data$Date, y = train_data$Adj.Close))
-future_adj_close <- make_future_dataframe(prophet_adj_close, periods = 365)
-forecast_adj_close <- predict(prophet_adj_close, future_adj_close)
-plot(prophet_adj_close, forecast_adj_close)
+prophet_forecast_open <- forecast_open$yhat[-(1:nrow(train_data))]
+rmse_prophet_open <- rmse(test_data$Open, prophet_forecast_open)
+mae_prophet_open <- mae(test_data$Open, prophet_forecast_open)
+mape_prophet_open <- mape(test_data$Open, prophet_forecast_open)
 
 # 5. GARCH Model
 spec_open <- ugarchspec(variance.model = list(model = "sGARCH", garchOrder = c(1, 1)),
                         mean.model = list(armaOrder = c(1, 1), include.mean = TRUE))
 garch_open <- ugarchfit(spec_open, train_data$Open)
-summary(garch_open)
+garch_forecast_open <- ugarchforecast(garch_open, n.ahead = nrow(test_data))@forecast$seriesFor
+rmse_garch_open <- rmse(test_data$Open, garch_forecast_open)
+mae_garch_open <- mae(test_data$Open, garch_forecast_open)
+mape_garch_open <- mape(test_data$Open, garch_forecast_open)
 
-spec_close <- ugarchspec(variance.model = list(model = "sGARCH", garchOrder = c(1, 1)),
-                         mean.model = list(armaOrder = c(1, 1), include.mean = TRUE))
-garch_close <- ugarchfit(spec_close, train_data$Close)
-summary(garch_close)
-
-spec_adj_close <- ugarchspec(variance.model = list(model = "sGARCH", garchOrder = c(1, 1)),
-                             mean.model = list(armaOrder = c(1, 1), include.mean = TRUE))
-garch_adj_close <- ugarchfit(spec_adj_close, train_data$Adj.Close)
-summary(garch_adj_close)
-
-# 6. Spectral Analysis (Frequency Domain Analysis)
-periodogram(train_data$Open)
-periodogram(train_data$Close)
-periodogram(train_data$Adj.Close)
-
-# 7. Threshold Models (TAR Model)
-tar_open <- setar(train_data$Open, m = 2)
-summary(tar_open)
-
-tar_close <- setar(train_data$Close, m = 2)
-summary(tar_close)
-
-tar_adj_close <- setar(train_data$Adj.Close, m = 2)
-summary(tar_adj_close)
-
-# 8. VAR Model
+# 6. VAR Model
 var_model <- VAR(train_data[, c("Open", "Close")], p = 2)
-summary(var_model)
-
-# Forecast
-var_forecast <- predict(var_model, n.ahead = 30)
-plot(var_forecast)
-
-# Performance Metrics for VAR
+var_forecast <- predict(var_model, n.ahead = nrow(test_data))
 var_forecast_open <- var_forecast$fcst$Open[, "fcst"]
 rmse_var_open <- rmse(test_data$Open, var_forecast_open)
 mae_var_open <- mae(test_data$Open, var_forecast_open)
 mape_var_open <- mape(test_data$Open, var_forecast_open)
 
-# 9. TBATS Model
+# 7. TBATS Model
 tbats_model <- tbats(ts(train_data$Open, frequency = 365))
-summary(tbats_model)
-
-# Forecast
-tbats_forecast <- forecast(tbats_model, h = 30)
-plot(tbats_forecast)
-
-# Performance Metrics for TBATS
+tbats_forecast <- forecast(tbats_model, h = nrow(test_data))
 tbats_forecast_open <- tbats_forecast$mean
 rmse_tbats_open <- rmse(test_data$Open, tbats_forecast_open)
 mae_tbats_open <- mae(test_data$Open, tbats_forecast_open)
 mape_tbats_open <- mape(test_data$Open, tbats_forecast_open)
 
-# 10. Random Forest
+# 8. Random Forest
 rf_model <- randomForest(Open ~ ., data = train_data[, c("Open", "Close", "High", "Low", "Volume")])
-summary(rf_model)
-
-# Forecast
 rf_forecast <- predict(rf_model, newdata = test_data)
-plot(test_data$Open, type = "l", main = "Random Forest Forecast", xlab = "Time", ylab = "Open Price")
-lines(rf_forecast, col = "red")
-
-# Performance Metrics for Random Forest
 rmse_rf_open <- rmse(test_data$Open, rf_forecast)
 mae_rf_open <- mae(test_data$Open, rf_forecast)
 mape_rf_open <- mape(test_data$Open, rf_forecast)
 
-# 11. Neural Networks (NNETAR)
-nnetar_model <- nnetar(train_data$Open)
-summary(nnetar_model)
-
-# Forecast
-nnetar_forecast <- forecast(nnetar_model, h = 30)
-plot(nnetar_forecast)
-
-# Performance Metrics for NNETAR
+# 9. Neural Networks (NNETAR)
+nnetar_model <- nnetar(train_data$Open, frequency = 365)
+nnetar_forecast <- forecast(nnetar_model, h = nrow(test_data))
 nnetar_forecast_open <- nnetar_forecast$mean
 rmse_nnetar_open <- rmse(test_data$Open, nnetar_forecast_open)
 mae_nnetar_open <- mae(test_data$Open, nnetar_forecast_open)
@@ -428,11 +391,22 @@ ggplot(data.frame(Residuals = residuals(arima_adj_close)), aes(x = 1:length(Resi
   labs(title = "Residual Plot for ARIMA Model (Adj.Close Prices)", x = "Time", y = "Residuals")
 
 # 5.2 Performance Metrics
-rmse_open <- rmse(msft$Open, fitted(arima_open))
-mae_open <- mae(msft$Open, fitted(arima_open))
+# Ensure the fitted values cover the same time period as the actual values
+fitted_open <- fitted(arima_open)
+fitted_close <- fitted(arima_close)
+fitted_adj_close <- fitted(arima_adj_close)
+
+# Combine fitted values with the test data
+combined_open <- c(fitted_open, rep(NA, nrow(msft) - length(fitted_open)))
+combined_close <- c(fitted_close, rep(NA, nrow(msft) - length(fitted_close)))
+combined_adj_close <- c(fitted_adj_close, rep(NA, nrow(msft) - length(fitted_adj_close)))
+
+# Calculate performance metrics
+rmse_open <- rmse(msft$Open, combined_open)
+mae_open <- mae(msft$Open, combined_open)
 aic_open <- AIC(arima_open)
 bic_open <- BIC(arima_open)
-mape_open <- mape(msft$Open, fitted(arima_open))
+mape_open <- mape(msft$Open, combined_open)
 
 print(paste("RMSE (Open):", rmse_open))
 print(paste("MAE (Open):", mae_open))
@@ -440,11 +414,11 @@ print(paste("AIC (Open):", aic_open))
 print(paste("BIC (Open):", bic_open))
 print(paste("MAPE (Open):", mape_open))
 
-rmse_close <- rmse(msft$Close, fitted(arima_close))
-mae_close <- mae(msft$Close, fitted(arima_close))
+rmse_close <- rmse(msft$Close, combined_close)
+mae_close <- mae(msft$Close, combined_close)
 aic_close <- AIC(arima_close)
 bic_close <- BIC(arima_close)
-mape_close <- mape(msft$Close, fitted(arima_close))
+mape_close <- mape(msft$Close, combined_close)
 
 print(paste("RMSE (Close):", rmse_close))
 print(paste("MAE (Close):", mae_close))
@@ -452,11 +426,11 @@ print(paste("AIC (Close):", aic_close))
 print(paste("BIC (Close):", bic_close))
 print(paste("MAPE (Close):", mape_close))
 
-rmse_adj_close <- rmse(msft$Adj.Close, fitted(arima_adj_close))
-mae_adj_close <- mae(msft$Adj.Close, fitted(arima_adj_close))
+rmse_adj_close <- rmse(msft$Adj.Close, combined_adj_close)
+mae_adj_close <- mae(msft$Adj.Close, combined_adj_close)
 aic_adj_close <- AIC(arima_adj_close)
 bic_adj_close <- BIC(arima_adj_close)
-mape_adj_close <- mape(msft$Adj.Close, fitted(arima_adj_close))
+mape_adj_close <- mape(msft$Adj.Close, combined_adj_close)
 
 print(paste("RMSE (Adj.Close):", rmse_adj_close))
 print(paste("MAE (Adj.Close):", mae_adj_close))
@@ -475,21 +449,58 @@ forecast_adj_close <- forecast(arima_adj_close, h = 30)
 plot(forecast_adj_close)
 
 # Cross-Validation for Time Series
-tsCV_open <- tsCV(ts(msft$Open), forecastfunction = Arima, h = 1, initial = 100)
-plot(tsCV_open)
+# Define the time series split function
+time_series_split <- function(data, train_start, train_end, test_start, test_end) {
+  train <- data %>% filter(Date >= train_start & Date <= train_end)
+  test <- data %>% filter(Date >= test_start & Date <= test_end)
+  return(list(train = train, test = test))
+}
 
-tsCV_close <- tsCV(ts(msft$Close), forecastfunction = Arima, h = 1, initial = 100)
-plot(tsCV_close)
+# Define the forecast function (e.g., ARIMA)
+forecast_function <- function(train) {
+  auto.arima(train$Open)
+}
 
-tsCV_adj_close <- tsCV(ts(msft$Adj.Close), forecastfunction = Arima, h = 1, initial = 100)
-plot(tsCV_adj_close)
+# Define the time periods for the splits
+train_start <- as.Date("1986-01-01")
+train_end <- as.Date("2001-12-31")
+test_start <- as.Date("2002-01-01")
+test_end <- as.Date("2014-12-31")
+
+# Perform time series split
+split <- time_series_split(msft, train_start, train_end, test_start, test_end)
+train_data <- split$train
+test_data <- split$test
+
+# Fit the model on the training data
+model <- forecast_function(train_data)
+
+# Forecast on the test data
+forecast <- forecast(model, h = nrow(test_data))$mean
+
+# Calculate performance metrics
+rmse_value <- rmse(test_data$Open, forecast)
+mae_value <- mae(test_data$Open, forecast)
+mape_value <- mape(test_data$Open, forecast)
+
+print(paste("RMSE:", rmse_value))
+print(paste("MAE:", mae_value))
+print(paste("MAPE:", mape_value))
+
+# Plot the actual vs forecasted values
+plot_data <- data.frame(Date = test_data$Date, Actual = test_data$Open, Forecast = forecast)
+ggplot(plot_data, aes(x = Date)) +
+  geom_line(aes(y = Actual, color = "Actual")) +
+  geom_line(aes(y = Forecast, color = "Forecast")) +
+  labs(title = "Actual vs Forecasted Open Prices", x = "Date", y = "Price", color = "Legend") +
+  scale_color_manual(values = c("Actual" = "blue", "Forecast" = "red"))
 
 # Create a summary table for performance metrics
 performance_metrics <- data.frame(
   Model = c("ARIMA", "SARIMA", "Holt-Winters", "Prophet", "GARCH", "VAR", "TBATS", "Random Forest", "NNETAR"),
-  RMSE = c(rmse_open, rmse_close, rmse_adj_close, rmse_prophet_open, rmse_garch_open, rmse_var_open, rmse_tbats_open, rmse_rf_open, rmse_nnetar_open),
-  MAE = c(mae_open, mae_close, mae_adj_close, mae_prophet_open, mae_garch_open, mae_var_open, mae_tbats_open, mae_rf_open, mae_nnetar_open),
-  MAPE = c(mape_open, mape_close, mape_adj_close, mape_prophet_open, mape_garch_open, mape_var_open, mape_tbats_open, mape_rf_open, mape_nnetar_open)
+  RMSE = c(rmse_arima_open, rmse_sarima_open, rmse_hw_open, rmse_prophet_open, rmse_garch_open, rmse_var_open, rmse_tbats_open, rmse_rf_open, rmse_nnetar_open),
+  MAE = c(mae_arima_open, mae_sarima_open, mae_hw_open, mae_prophet_open, mae_garch_open, mae_var_open, mae_tbats_open, mae_rf_open, mae_nnetar_open),
+  MAPE = c(mape_arima_open, mape_sarima_open, mape_hw_open, mape_prophet_open, mape_garch_open, mape_var_open, mape_tbats_open, mape_rf_open, mape_nnetar_open)
 )
 
 # Print the summary table
@@ -504,3 +515,94 @@ ggplot(performance_metrics_long, aes(x = Model, y = Value, fill = Metric)) +
   facet_wrap(~Metric, scales = "free_y") +
   labs(title = "Model Performance Metrics", x = "Model", y = "Value") +
   theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+# 6.1
+# Train the Random Forest model on the entire dataset
+rf_model <- randomForest(Open ~ ., data = msft[, c("Open", "Close", "High", "Low", "Volume")])
+
+# Forecast the next 30 days
+forecast_horizon <- 365
+future_dates <- seq(max(msft$Date) + 1, by = "day", length.out = forecast_horizon)
+
+# Create future data with all necessary predictor variables
+future_data <- data.frame(
+  Date = future_dates,
+  Close = rep(mean(msft$Close), forecast_horizon),
+  High = rep(mean(msft$High), forecast_horizon),
+  Low = rep(mean(msft$Low), forecast_horizon),
+  Volume = rep(mean(msft$Volume), forecast_horizon)
+)
+
+# Predict using the Random Forest model
+rf_forecast <- predict(rf_model, newdata = future_data)
+
+# Plot the forecast
+plot_data <- data.frame(Date = future_dates, Forecast = rf_forecast)
+ggplot(plot_data, aes(x = Date, y = Forecast)) +
+  geom_line(color = "blue") +
+  labs(title = "Random Forest Forecast for the Next 30 Days", x = "Date", y = "Open Price")
+
+# Calculate confidence intervals for Random Forest forecasts
+# Since Random Forest does not inherently provide confidence intervals, we can use bootstrapping
+
+# Function to calculate confidence intervals using bootstrapping
+bootstrap_confidence_intervals <- function(model, newdata, n_samples = 1000, alpha = 0.05) {
+  predictions <- replicate(n_samples, {
+    boot_data <- newdata[sample(nrow(newdata), replace = TRUE), ]
+    predict(model, newdata = boot_data)
+  })
+  lower_ci <- apply(predictions, 1, quantile, alpha / 2)
+  upper_ci <- apply(predictions, 1, quantile, 1 - alpha / 2)
+  return(list(lower_ci = lower_ci, upper_ci = upper_ci))
+}
+
+# Calculate confidence intervals
+ci <- bootstrap_confidence_intervals(rf_model, future_data)
+
+# Add confidence intervals to the forecast plot
+plot_data$Lower_CI <- ci$lower_ci
+plot_data$Upper_CI <- ci$upper_ci
+
+ggplot(plot_data, aes(x = Date)) +
+  geom_line(aes(y = Forecast, color = "Forecast")) +
+  geom_ribbon(aes(ymin = Lower_CI, ymax = Upper_CI), alpha = 0.2) +
+  labs(title = "Random Forest Forecast with Confidence Intervals", x = "Date", y = "Open Price", color = "Legend") +
+  scale_color_manual(values = c("Forecast" = "blue"))
+
+# Function to update the Random Forest model dynamically
+update_forecast <- function(model, new_data) {
+  updated_model <- randomForest(Open ~ ., data = new_data[, c("Open", "Close", "High", "Low", "Volume")])
+  return(updated_model)
+}
+
+# Simulate updating the model with new data
+# Assuming new_data is the new data available after the initial forecast
+new_data <- msft[1:365, ]  # Example: Use the first 30 rows as new data
+updated_model <- update_forecast(rf_model, new_data)
+
+# Forecast using the updated model
+updated_forecast <- predict(updated_model, newdata = future_data)
+
+# Plot the updated forecast
+updated_plot_data <- data.frame(Date = future_dates, Forecast = updated_forecast)
+ggplot(updated_plot_data, aes(x = Date, y = Forecast)) +
+  geom_line(color = "blue") +
+  labs(title = "Updated Random Forest Forecast", x = "Date", y = "Open Price")
+
+# Prepare the data for VAR model
+var_data <- msft[, c("Open", "Close", "High", "Low", "Volume")]
+
+# Fit the VAR model
+var_model <- VAR(var_data, p = 2)
+
+# Forecast the next 30 days using the VAR model
+var_forecast <- predict(var_model, n.ahead = 365)
+
+# Extract the forecasts for the "Open" variable
+var_forecast_open <- var_forecast$fcst$Open[, "fcst"]
+
+# Plot the VAR forecast
+var_plot_data <- data.frame(Date = future_dates, Forecast = var_forecast_open)
+ggplot(var_plot_data, aes(x = Date, y = Forecast)) +
+  geom_line(color = "blue") +
+  labs(title = "VAR Forecast for the Next 365 Days", x = "Date", y = "Open Price")
